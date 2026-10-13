@@ -1,0 +1,288 @@
+import json
+import csv
+import math
+import os
+import tempfile
+import unittest
+from pathlib import Path
+
+from cfdpost.models import AnalysisRequest, RequestError
+from cfdpost.clusters import save_cluster
+from cfdpost.session import AnalysisSession
+from cfdpost.workflow import prepare
+
+
+class WorkflowTests(unittest.TestCase):
+    def test_notebook_session_requires_approval_then_writes_python_script(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "tiny.vtk"
+            source.write_text("placeholder", encoding="utf-8")
+            session = AnalysisSession(str(source), str(root / "result"), cpus=3)
+            session.line_plot("pressure", [0, 0, 0], [1, 0, 0], resolution=4)
+            self.assertIn("1. line_plot", session.review())
+            with self.assertRaisesRegex(RequestError, "approve"):
+                session.write()
+            script = Path(session.approve().write())
+            request = json.loads((script.parent / "request.json").read_text(encoding="utf-8"))
+            self.assertTrue(request["approved"])
+            self.assertEqual(request["cpus"], 3)
+            self.assertEqual(request["actions"][0]["start"], [0, 0, 0])
+            self.assertIn("'cfdpost', 'execute'", script.read_text(encoding="utf-8"))
+
+    def test_slurm_script_uses_user_resources_and_does_not_submit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "case.pvtu"
+            source.write_text('<VTKFile><PUnstructuredGrid><Piece Source="part.vtu"/></PUnstructuredGrid></VTKFile>',
+                              encoding="utf-8")
+            (root / "part.vtu").write_text("placeholder", encoding="utf-8")
+            request = AnalysisRequest.from_dict({
+                "input": str(source), "output": str(root / "result"), "approved": True,
+                "execution": "slurm", "nodes": 4, "cpus_per_node": 12,
+                "slurm": {"account": "flow", "partition": "compute"},
+                "actions": [{"type": "line_plot", "field": "p", "start": [0, 0, 0], "end": [1, 0, 0]}],
+            })
+            prepare(request)
+            slurm = (root / "result" / "submit.slurm").read_text(encoding="utf-8")
+            self.assertIn("#SBATCH --nodes=4", slurm)
+            self.assertIn("#SBATCH --ntasks=4", slurm)
+            self.assertIn("#SBATCH --cpus-per-task=12", slurm)
+            self.assertIn("srun python -m cfdpost execute", slurm)
+            self.assertNotIn("sbatch ", slurm)
+
+    def test_saved_cluster_profile_is_overridden_by_per_job_settings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "case.pvtu"
+            source.write_text('<VTKFile><PUnstructuredGrid><Piece Source="part.vtu"/></PUnstructuredGrid></VTKFile>',
+                              encoding="utf-8")
+            (root / "part.vtu").write_text("placeholder", encoding="utf-8")
+            previous = Path.cwd()
+            try:
+                os.chdir(root)
+                save_cluster("local_hpc", {"account": "project-a", "partition": "compute", "time": "02:00:00"})
+                request = AnalysisRequest.from_dict({
+                    "input": str(source), "output": str(root / "result"), "approved": True,
+                    "execution": "slurm", "nodes": 2, "cpus_per_node": 8,
+                    "slurm_profile": "local_hpc", "slurm": {"time": "04:00:00"},
+                    "actions": [{"type": "line_plot", "field": "p", "start": [0, 0, 0], "end": [1, 0, 0]}],
+                })
+                prepare(request)
+                slurm = (root / "result" / "submit.slurm").read_text(encoding="utf-8")
+                self.assertIn("#SBATCH --account=project-a", slurm)
+                self.assertIn("#SBATCH --partition=compute", slurm)
+                self.assertIn("#SBATCH --time=04:00:00", slurm)
+            finally:
+                os.chdir(previous)
+
+    def test_temporal_line_plot_requires_physical_time_before_approval(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "series.pvd"
+            source.write_text(
+                '<VTKFile><Collection><DataSet timestep="0" file="a.vtu"/>'
+                '<DataSet timestep="1" file="b.vtu"/></Collection></VTKFile>', encoding="utf-8"
+            )
+            (root / "a.vtu").write_text("fixture", encoding="utf-8")
+            (root / "b.vtu").write_text("fixture", encoding="utf-8")
+            with self.assertRaisesRegex(RequestError, "physical 'time'"):
+                AnalysisRequest.from_dict({
+                    "input": str(source), "output": str(root / "out"),
+                    "actions": [{"type": "line_plot", "field": "p", "start": [0, 0, 0], "end": [1, 0, 0]}],
+                })
+
+
+class VtkAcceptanceTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        try:
+            import vtk  # noqa: F401
+            import numpy  # noqa: F401
+            import matplotlib  # noqa: F401
+        except ImportError:
+            raise unittest.SkipTest("VTK, NumPy, and Matplotlib are required for the data-path acceptance test")
+
+    def test_approved_vtk_line_workflow_writes_csv_png_script_and_log(self):
+        from cfdpost.executor import execute
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "triangle.vtk"
+            source.write_text(
+                "# vtk DataFile Version 3.0\nsmall triangle\nASCII\nDATASET POLYDATA\n"
+                "POINTS 3 float\n0 0 0  1 0 0  0 1 0\nPOLYGONS 1 4\n3 0 1 2\n"
+                "POINT_DATA 3\nSCALARS pressure float 1\nLOOKUP_TABLE default\n1 2 3\n",
+                encoding="utf-8",
+            )
+            request = AnalysisRequest.from_dict({
+                "input": str(source), "output": str(root / "result"), "approved": True, "cpus": 2,
+                "actions": [{"type": "line_plot", "field": "pressure", "start": [0.1, 0.1, 0],
+                             "end": [0.7, 0.1, 0], "resolution": 8}],
+            })
+            prepare(request)
+            execute(request)
+            result = root / "result"
+            self.assertTrue((result / "line_pressure.csv").is_file())
+            self.assertTrue((result / "line_pressure.png").is_file())
+            self.assertTrue((result / "run.log").is_file())
+            self.assertTrue((result / "run_analysis.py").is_file())
+
+    def _write_pvtu(self, root: Path, point_values: str = "1 2 3") -> Path:
+        master = root / "case.pvtu"
+        master.write_text(
+            '<VTKFile type="PUnstructuredGrid" version="1.0" byte_order="LittleEndian">'
+            '<PUnstructuredGrid GhostLevel="0"><PPointData Scalars="pressure">'
+            '<PDataArray type="Float32" Name="pressure"/></PPointData><PCellData/>'
+            '<PPoints><PDataArray type="Float32" NumberOfComponents="3"/></PPoints>'
+            '<Piece Source="piece.vtu"/></PUnstructuredGrid></VTKFile>', encoding="utf-8"
+        )
+        (root / "piece.vtu").write_text(
+            '<VTKFile type="UnstructuredGrid" version="1.0" byte_order="LittleEndian">'
+            '<UnstructuredGrid><Piece NumberOfPoints="3" NumberOfCells="1">'
+            f'<PointData Scalars="pressure"><DataArray type="Float32" Name="pressure" format="ascii">{point_values}</DataArray></PointData>'
+            '<CellData/><Points><DataArray type="Float32" NumberOfComponents="3" format="ascii">'
+            '0 0 0 1 0 0 0 1 0</DataArray></Points><Cells>'
+            '<DataArray type="Int64" Name="connectivity" format="ascii">0 1 2</DataArray>'
+            '<DataArray type="Int64" Name="offsets" format="ascii">3</DataArray>'
+            '<DataArray type="UInt8" Name="types" format="ascii">5</DataArray>'
+            '</Cells></Piece></UnstructuredGrid></VTKFile>', encoding="utf-8"
+        )
+        return master
+
+    def test_pvtu_line_workflow_reads_piece_and_writes_results(self):
+        from cfdpost.executor import execute
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = self._write_pvtu(root)
+            request = AnalysisRequest.from_dict({
+                "input": str(source), "output": str(root / "result"), "approved": True,
+                "actions": [{"type": "line_plot", "field": "pressure", "start": [0.1, 0.1, 0],
+                             "end": [0.7, 0.1, 0], "resolution": 8}],
+            })
+            prepare(request)
+            execute(request)
+            self.assertTrue((root / "result" / "line_pressure.png").is_file())
+
+    def test_array_size_mismatch_stops_before_plotting_and_keeps_source(self):
+        from cfdpost.executor import execute
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = self._write_pvtu(root, "1 2")
+            original = (root / "piece.vtu").read_bytes()
+            request = AnalysisRequest.from_dict({
+                "input": str(source), "output": str(root / "result"), "approved": True,
+                "actions": [{"type": "line_plot", "field": "pressure", "start": [0, 0, 0], "end": [1, 0, 0]}],
+            })
+            with self.assertRaisesRegex(RequestError, "size mismatch"):
+                execute(request)
+            self.assertEqual((root / "piece.vtu").read_bytes(), original)
+            self.assertFalse((root / "result" / "line_pressure.png").exists())
+
+    def test_time_weighted_statistics_use_physical_timestamps(self):
+        from cfdpost.executor import execute
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for time_value, pressure in ((0, 0), (1, 1), (3, 3)):
+                source = root / f"case-{time_value}.vtk"
+                source.write_text(
+                    "# vtk DataFile Version 3.0\ntime sample\nASCII\nDATASET POLYDATA\n"
+                    "POINTS 3 float\n0 0 0  1 0 0  0 1 0\nPOLYGONS 1 4\n3 0 1 2\n"
+                    f"POINT_DATA 3\nSCALARS pressure float 1\nLOOKUP_TABLE default\n{pressure} {pressure} {pressure}\n",
+                    encoding="utf-8",
+                )
+            pvd = root / "series.pvd"
+            pvd.write_text(
+                '<VTKFile><Collection><DataSet timestep="0" file="case-0.vtk"/>'
+                '<DataSet timestep="1" file="case-1.vtk"/><DataSet timestep="3" file="case-3.vtk"/>'
+                '</Collection></VTKFile>', encoding="utf-8"
+            )
+            request = AnalysisRequest.from_dict({
+                "input": str(pvd), "output": str(root / "result"), "approved": True,
+                "actions": [{"type": "mean", "field": "pressure", "save_field": True,
+                             "spatial_weighting": "cell_measure"}],
+            })
+            execute(request)
+            with (root / "result" / "statistics_action01.csv").open(encoding="utf-8") as stream:
+                row = next(csv.DictReader(stream))
+            self.assertEqual(float(row["time_start"]), 0.0)
+            self.assertEqual(float(row["time_end"]), 3.0)
+            self.assertAlmostEqual(float(row["value_mean"]), 1.5)
+            self.assertTrue(math.isclose(float(row["duration"]), 3.0))
+            self.assertTrue(list((root / "result").glob("derived_mean_pressure_part*.vtk")))
+
+    def test_composed_temporal_workflow_covers_derived_line_slice_threshold_streamline_and_average(self):
+        from cfdpost.custom import register
+        from cfdpost.executor import execute
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for time_value, offset in ((0, 0), (2, 2)):
+                source = root / f"tetra-{time_value}.vtk"
+                source.write_text(
+                    "# vtk DataFile Version 3.0\ntetra mesh\nASCII\nDATASET UNSTRUCTURED_GRID\n"
+                    "POINTS 4 float\n0 0 0  1 0 0  0 1 0  0 0 1\n"
+                    "CELLS 1 5\n4 0 1 2 3\nCELL_TYPES 1\n10\n"
+                    f"POINT_DATA 4\nSCALARS pressure float 1\nLOOKUP_TABLE default\n{1+offset} {2+offset} {3+offset} {4+offset}\n"
+                    "VECTORS velocity float\n1 0 0  1 0 0  1 0 0  1 0 0\n",
+                    encoding="utf-8",
+                )
+            collection = root / "series.pvd"
+            collection.write_text(
+                '<VTKFile><Collection><DataSet timestep="0" file="tetra-0.vtk"/>'
+                '<DataSet timestep="2" file="tetra-2.vtk"/></Collection></VTKFile>', encoding="utf-8"
+            )
+            functions = root / "analysis_functions.py"
+            functions.write_text(
+                "from vtk.util.numpy_support import vtk_to_numpy\n"
+                "def double_pressure(dataset, constants):\n"
+                "    values = vtk_to_numpy(dataset.GetPointData().GetArray('pressure')) * 2\n"
+                "    return {'name': 'double_pressure', 'association': 'point', 'values': values}\n",
+                encoding="utf-8",
+            )
+            previous = Path.cwd()
+            try:
+                os.chdir(root)
+                register("double_pressure", str(functions), "double_pressure")
+                request = AnalysisRequest.from_dict({
+                    "input": str(collection), "output": str(root / "result"), "approved": True,
+                    "actions": [
+                        {"type": "derived", "function": "double_pressure", "time": 0},
+                        {"type": "line_plot", "field": "double_pressure", "start": [0.05, 0.05, 0.1],
+                         "end": [0.4, 0.05, 0.1], "time": 0, "resolution": 8},
+                        {"type": "slice_contour", "field": "pressure", "origin": [0, 0, 0.2],
+                         "normal": [0, 0, 1], "time": 0},
+                        {"type": "threshold", "field": "pressure", "range": [1.5, 3.5], "name": "middle",
+                         "time": 0},
+                        {"type": "line_plot", "field": "pressure", "start": [0.05, 0.05, 0.1],
+                         "end": [0.4, 0.05, 0.1], "time": 0, "selection": "middle", "resolution": 8},
+                        {"type": "streamlines", "field": "velocity", "seeds": {"type": "points", "points": [[0.1, 0.1, 0.1]]},
+                         "time": 0},
+                        {"type": "azimuthal_average", "field": "pressure", "axis": [0, 0, 1],
+                         "origin": [0, 0, 0], "slice": {"origin": [0, 0, 0.2], "normal": [0, 0, 1]},
+                         "time": 0, "bins": 5},
+                        {"type": "mean", "field": "pressure", "save_field": True},
+                        {"type": "rms", "field": "pressure", "result": "fluctuation_rms"},
+                    ],
+                })
+                prepare(request)
+                prepared = AnalysisRequest.from_dict(json.loads((root / "result" / "request.json").read_text()))
+                execute(prepared)
+            finally:
+                os.chdir(previous)
+            result = root / "result"
+            self.assertTrue((result / "line_t0_double_pressure.png").is_file())
+            self.assertTrue((result / "slice_t0_pressure.png").is_file())
+            self.assertTrue(list(result.glob("threshold_*.vtk")))
+            self.assertTrue(list(result.glob("streamlines_*.png")))
+            self.assertTrue(list(result.glob("azimuthal_*.csv")))
+            self.assertTrue((result / "statistics_action08.csv").is_file())
+            self.assertTrue((result / "statistics_action09.csv").is_file())
+            self.assertTrue((result / "observations.md").is_file())
+
+
+if __name__ == "__main__":
+    unittest.main()

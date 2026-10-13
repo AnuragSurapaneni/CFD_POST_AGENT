@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cfd-post-processing-agent"
+version = "0.1.0"
+description = "Reproducible VTK post-processing workflows for CFD data"
+requires-python = ">=3.10"
+dependencies = ["vtk>=9.2", "numpy>=1.24", "matplotlib>=3.7"]
+
+[project.optional-dependencies]
+mpi = ["mpi4py>=3.1"]
+dev = ["pytest>=7"]
+
+[project.scripts]
+cfdpost = "cfdpost.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["cfdpost*"]

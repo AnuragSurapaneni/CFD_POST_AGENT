@@ -1,0 +1,7 @@
+<VTKFile type="Collection" version="0.1" byte_order="LittleEndian">
+	<Collection>
+		<DataSet timestep="0" file='fin_rate_autoig_gri_no_nsi_00000000.pvtu'/>
+		<DataSet timestep="0.0005" file='fin_rate_autoig_gri_no_nsi_00000010.pvtu'/>
+		<DataSet timestep="0.001" file='fin_rate_autoig_gri_no_nsi_00000020.pvtu'/>
+	</Collection>
+</VTKFile>

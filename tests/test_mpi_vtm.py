@@ -184,7 +184,13 @@ class MpiVtmAcceptanceTests(unittest.TestCase):
             )
             request = AnalysisRequest.from_dict({
                 "input": str(source), "output": str(root / "stats"), "approved": True,
-                "actions": [{"type": "mean", "field": "pressure"}, {"type": "rms", "field": "pressure"}],
+                "actions": [
+                    {"type": "mean", "field": "pressure"},
+                    {"type": "rms", "field": "pressure"},
+                    {"type": "mean", "field": "temperature", "association": "cell"},
+                    {"type": "rms", "field": "temperature", "association": "cell",
+                     "result": "fluctuation_rms"},
+                ],
             })
             prepare(request)
             execute(request)
@@ -192,11 +198,18 @@ class MpiVtmAcceptanceTests(unittest.TestCase):
                 mean = next(csv.DictReader(stream))
             with (root / "stats" / "statistics_action02.csv").open(encoding="utf-8") as stream:
                 rms = next(csv.DictReader(stream))
+            with (root / "stats" / "statistics_action03.csv").open(encoding="utf-8") as stream:
+                cell_mean = next(csv.DictReader(stream))
+            with (root / "stats" / "statistics_action04.csv").open(encoding="utf-8") as stream:
+                cell_fluctuation_rms = next(csv.DictReader(stream))
             self.assertEqual(float(mean["time_start"]), 0.0)
             self.assertEqual(float(mean["time_end"]), 2.0)
             self.assertAlmostEqual(float(mean["value_mean"]), 7.0)
             self.assertAlmostEqual(float(rms["value_mean"]), 53 ** 0.5)
             self.assertEqual(int(mean["sample_count"]), 8)
+            self.assertEqual(cell_mean["association"], "cell")
+            self.assertAlmostEqual(float(cell_mean["value_mean"]), 12.0)
+            self.assertAlmostEqual(float(cell_fluctuation_rms["value_mean"]), 0.0)
 
     def test_vtm_custom_global_results_combine_all_blocks(self):
         from cfdpost.executor import execute

@@ -6,8 +6,17 @@
 
 **Status:** ready-for-agent
 
-- [ ] The user can select the node and CPU resources for the run.
+**Completion:** partial
+
+- [x] The user can select the node and CPU resources for the run.
 - [ ] MPI distributes one case across selected nodes and the workflow returns the requested line plot and samples.
-- [ ] Input is read in place unless the execution environment requires staging.
-- [ ] Each run records elapsed time, data processed, memory use, and node count.
+- [x] Input is read in place unless the execution environment requires staging.
+- [x] Each run records elapsed time, input bytes, memory use, and requested/observed node count.
 - [ ] A bounded-memory representative run verifies the behavior without requiring a multi-terabyte test fixture.
+
+## Acceptance evidence
+
+- `test_slurm_script_uses_user_resources_and_does_not_submit` and `test_approved_vtk_line_workflow_writes_csv_png_script_and_log` cover resource selection and telemetry.
+- `test_pvtu_line_workflow_reads_piece_and_writes_results` checks successful processing leaves its input manifest unchanged.
+- `test_vtm_reader_assigns_blocks_to_distinct_rank_requests`, `test_vtm_reader_preserves_uneven_and_empty_rank_assignments`, and `test_pvtu_reader_distributes_piece_requests_across_ranks` cover rank assignment at the reader seam.
+- `test_vtm_workflow_matches_single_rank_outputs_across_mpi_ranks` is the end-to-end MPI acceptance test, but it was skipped because `CFDPOST_RUN_MPI_TESTS=1` is opt-in. No bounded-memory MPI run has been verified; those two criteria remain open.

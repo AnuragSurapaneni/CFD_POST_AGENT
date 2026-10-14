@@ -6,7 +6,15 @@
 
 **Status:** ready-for-agent
 
-- [ ] The line-plot workflow accepts supported .pvtu and multi-block cases alongside .vtk input.
-- [ ] Point-field tuple counts are checked against mesh point counts; cell-field tuple counts are checked against mesh cell counts.
-- [ ] A mismatch stops the run with a clear diagnostic and does not alter source data.
-- [ ] Both valid and mismatched fixtures are demonstrated through the end-to-end workflow.
+**Completion:** verified
+
+- [x] The line-plot workflow accepts supported .pvtu and multi-block cases alongside .vtk input.
+- [x] Point-field tuple counts are checked against mesh point counts; cell-field tuple counts are checked against mesh cell counts.
+- [x] A mismatch stops the run with a clear diagnostic and does not alter source data.
+- [x] Both valid and mismatched fixtures are demonstrated through the end-to-end workflow.
+
+## Acceptance evidence
+
+- `test_pvtu_line_workflow_reads_piece_and_writes_results` exercises valid point and cell fields through `.pvtu`.
+- `test_vtm_single_rank_line_plots_combine_all_blocks_once` exercises multi-block input.
+- `test_array_size_mismatch_stops_before_plotting_and_keeps_source` and `test_cell_array_size_mismatch_stops_before_plotting_and_keeps_source` verify point and cell tuple failures, diagnostics, and unchanged input files.

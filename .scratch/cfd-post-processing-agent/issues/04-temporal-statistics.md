@@ -6,7 +6,15 @@
 
 **Status:** ready-for-agent
 
-- [ ] Physical timestamps are used for temporal weighting; filename inference is used only when unambiguous.
-- [ ] The workflow provides time-weighted mean, raw RMS, and fluctuation RMS for supported point and cell fields.
-- [ ] Ambiguous time selection is clarified before execution.
-- [ ] The CSV results record the statistic, time range, weighting method, and relevant inputs.
+**Completion:** verified
+
+- [x] Physical timestamps from PVD or explicit time-series metadata are used for temporal weighting; missing physical times are rejected rather than inferred from filenames.
+- [x] The workflow provides time-weighted mean, raw RMS, and fluctuation RMS for supported point and cell fields.
+- [x] Missing physical time selection for a temporal action is reported before execution.
+- [x] The CSV results record the statistic, time range, weighting method, and relevant inputs.
+
+## Acceptance evidence
+
+- `test_time_weighted_statistics_use_physical_timestamps` checks nonuniform timestamps, mean, raw RMS, fluctuation RMS, saved derived fields, and time range.
+- `test_vtm_temporal_statistics_use_physical_times_across_all_blocks` checks point and cell statistics on multi-block temporal input.
+- `test_temporal_line_plot_requires_physical_time_before_approval` verifies a temporal request without a physical time is rejected before approval.

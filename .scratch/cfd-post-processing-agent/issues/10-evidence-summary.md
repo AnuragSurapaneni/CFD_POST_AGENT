@@ -6,6 +6,12 @@
 
 **Status:** ready-for-agent
 
-- [ ] The summary reports observations grounded in outputs from the completed workflow.
-- [ ] Each observation identifies the supporting statistic, variable, time selection, or visualization.
-- [ ] The wording presents observations for analyst evaluation rather than asserting definitive scientific conclusions.
+**Completion:** verified
+
+- [x] The summary reports observations grounded in outputs from the completed workflow.
+- [x] Each observation identifies the supporting statistic, variable, time selection, or visualization.
+- [x] The wording presents observations for analyst evaluation rather than asserting definitive scientific conclusions.
+
+## Acceptance evidence
+
+- `test_composed_temporal_workflow_covers_derived_line_slice_threshold_streamline_and_average` checks that observations name the variable/statistic and physical time range, link the supporting CSV, and are framed for analyst evaluation.

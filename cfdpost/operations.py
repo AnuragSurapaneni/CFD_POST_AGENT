@@ -203,9 +203,10 @@ def save_azimuthal_profile(profile: dict[str, np.ndarray], action: dict[str, Any
     path = output / f"azimuthal_{index:02d}.csv"
     with path.open("w", newline="", encoding="utf-8") as stream:
         writer = csv.writer(stream)
-        writer.writerow(["radius", action["field"] + "_mean", "sample_count", "angular_coverage_degrees",
+        writer.writerow(["time", "radius", action["field"] + "_mean", "sample_count", "angular_coverage_degrees",
                          "full_circumference_interpretation"])
-        writer.writerows((r, v, c, np.degrees(coverage), bool(action.get("full_circumference")))
+        selected_time = action.get("time", "static")
+        writer.writerows((selected_time, r, v, c, np.degrees(coverage), bool(action.get("full_circumference")))
                          for r, v, c in zip(centers, means, profile["counts"]))
     return path
 

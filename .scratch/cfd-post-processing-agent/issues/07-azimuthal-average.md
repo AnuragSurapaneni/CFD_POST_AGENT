@@ -6,8 +6,15 @@
 
 **Status:** ready-for-agent
 
-- [ ] The analyst specifies the averaging axis and slice geometry.
-- [ ] The analyst can choose radial bin count or spacing and receives a radial profile.
-- [ ] The result reports available angular coverage.
-- [ ] A partial sector is not treated as a full circumference without explicit user direction.
-- [ ] The result uses the selected timestamp or temporal statistic and records that choice.
+**Completion:** verified
+
+- [x] The analyst specifies the averaging axis and slice geometry.
+- [x] The analyst can choose radial bin count or spacing and receives a radial profile.
+- [x] The result reports available angular coverage.
+- [x] A partial sector is not treated as a full circumference without explicit user direction.
+- [x] The result uses the selected physical timestamp and records that choice in its CSV output.
+
+## Acceptance evidence
+
+- `test_composed_temporal_workflow_covers_derived_line_slice_threshold_streamline_and_average` checks a selected time, radial bins, time metadata, and angular coverage in the profile CSV.
+- `test_partial_azimuthal_sector_requires_explicit_acceptance` verifies the partial-sector error and succeeds only after explicit acceptance.

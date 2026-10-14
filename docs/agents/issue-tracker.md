@@ -8,6 +8,8 @@ Issues and specs for this repo live as markdown files in `.scratch/`.
 - The spec is `.scratch/<feature-slug>/spec.md`
 - Implementation issues are one file per ticket at `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01`, never a single combined tickets file
 - Triage state is recorded as a `Status:` line near the top of each issue file (see `triage-labels.md` for the role strings)
+- Implementation progress is recorded separately as `Completion: open`, `Completion: partial`, or `Completion: verified`. `verified` means every acceptance criterion has passing end-to-end test evidence; `partial` means passing evidence exists but an acceptance criterion remains unverified.
+- Completed acceptance criteria are checked off only when supported by passing tests. Add an `## Acceptance evidence` section that maps each verified ticket to the relevant test names and calls out skipped or outstanding verification.
 - Comments and conversation history append to the bottom of the file under a `## Comments` heading
 
 ## When a skill says "publish to the issue tracker"

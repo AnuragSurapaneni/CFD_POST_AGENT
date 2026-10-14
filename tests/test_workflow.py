@@ -164,6 +164,43 @@ class VtkAcceptanceTests(unittest.TestCase):
             self.assertEqual(performance["nodes_observed"], 1)
             self.assertEqual(performance["mpi_ranks"], 1)
 
+    def test_user_temporal_pvtu_fixture_supports_serial_line_slice_and_statistics(self):
+        from cfdpost.executor import execute
+
+        source_root = Path(__file__).resolve().parents[1] / "data" / "vtk"
+        source = source_root / "fin_rate_autoig_gri_no_nsi.pvd"
+        # t=0 is the mesh-only initial condition, so temporal statistics use the two populated snapshots.
+        series = [
+            {"time": 0.0005, "file": str(source_root / "fin_rate_autoig_gri_no_nsi_00000010.pvtu")},
+            {"time": 0.001, "file": str(source_root / "fin_rate_autoig_gri_no_nsi_00000020.pvtu")},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            request = AnalysisRequest.from_dict({
+                "input": str(source), "output": str(root / "result"), "approved": True, "time_series": series,
+                "actions": [
+                    {"type": "line_plot", "field": "TEMPE", "association": "point",
+                     "start": [-0.0015, 0, 0], "end": [0.0015, 0, 0], "resolution": 32, "time": 0.0005},
+                    {"type": "slice_contour", "field": "TEMPE", "origin": [0, 0, 0],
+                     "normal": [0, 0, 1], "time": 0.0005},
+                    {"type": "mean", "field": "TEMPE", "association": "point"},
+                    {"type": "rms", "field": "TEMPE", "association": "point"},
+                ],
+            })
+            execute(request)
+            result = root / "result"
+            self.assertTrue((result / "line_t0.0005_TEMPE.png").is_file())
+            self.assertTrue((result / "slice_t0.0005_TEMPE.png").is_file())
+            with (result / "statistics_action03.csv").open(encoding="utf-8") as stream:
+                mean = next(csv.DictReader(stream))
+            with (result / "statistics_action04.csv").open(encoding="utf-8") as stream:
+                raw_rms = next(csv.DictReader(stream))
+            self.assertEqual(float(mean["time_start"]), 0.0005)
+            self.assertEqual(float(mean["time_end"]), 0.001)
+            self.assertEqual(int(mean["sample_count"]), 84)
+            self.assertAlmostEqual(float(mean["value_mean"]), 1983.467379426408)
+            self.assertAlmostEqual(float(raw_rms["value_mean"]), 2040.507734479687)
+
     def _write_pvtu(self, root: Path, point_values: str = "1 2 3", cell_values: str = "7") -> Path:
         master = root / "case.pvtu"
         master.write_text(

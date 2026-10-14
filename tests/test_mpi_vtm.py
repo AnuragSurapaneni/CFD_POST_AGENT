@@ -1,5 +1,6 @@
 import csv
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -299,6 +300,93 @@ class MpiVtmAcceptanceTests(unittest.TestCase):
             self.assertTrue((root / "mpi" / "slice_t0_pressure.png").is_file())
             self.assertTrue((root / "mpi" / "performance.json").is_file())
             self.assertEqual(len(list((root / "mpi").glob("line_t0_*.csv"))), 2)
+            self.assertEqual(len(list((root / "mpi").glob("metrics_rank*.json"))), 2)
+
+    def test_user_pvtu_temporal_workflow_matches_single_rank_outputs(self):
+        if os.environ.get("CFDPOST_RUN_MPI_TESTS") != "1":
+            raise unittest.SkipTest("Set CFDPOST_RUN_MPI_TESTS=1 in an MPI-enabled environment to run this acceptance test")
+        from cfdpost.executor import execute
+
+        source_root = Path(__file__).resolve().parents[1] / "data" / "vtk"
+        source = source_root / "fin_rate_autoig_gri_no_nsi.pvd"
+        # t=0 is the mesh-only initial condition, so temporal statistics use the two populated snapshots.
+        time_series = [
+            {"time": 0.0005, "file": str(source_root / "fin_rate_autoig_gri_no_nsi_00000010.pvtu")},
+            {"time": 0.001, "file": str(source_root / "fin_rate_autoig_gri_no_nsi_00000020.pvtu")},
+        ]
+
+        def make_request(output: Path, registry: Path) -> AnalysisRequest:
+            return AnalysisRequest.from_dict({
+                "input": str(source), "output": str(output), "approved": True, "time_series": time_series,
+                "custom_registry": str(registry),
+                "actions": [
+                    {"type": "line_plot", "field": "TEMPE", "association": "point",
+                     "start": [-0.0015, 0, 0], "end": [0.0015, 0, 0], "resolution": 32, "time": 0.0005},
+                    {"type": "slice_contour", "field": "TEMPE", "origin": [0, 0, 0],
+                     "normal": [0, 0, 1], "time": 0.0005},
+                    {"type": "mean", "field": "TEMPE", "association": "point"},
+                    {"type": "rms", "field": "TEMPE", "association": "point"},
+                    {"type": "rms", "field": "TEMPE", "association": "point", "result": "fluctuation_rms"},
+                    {"type": "derived", "function": "global_point_count", "time": 0.0005},
+                ],
+            })
+
+        def assert_csv_rows_close(reference: list[list[str]], distributed: list[list[str]]) -> None:
+            self.assertEqual(len(reference), len(distributed))
+            for expected_row, actual_row in zip(reference, distributed):
+                self.assertEqual(len(expected_row), len(actual_row))
+                for expected, actual in zip(expected_row, actual_row):
+                    try:
+                        expected_number, actual_number = float(expected), float(actual)
+                    except ValueError:
+                        self.assertEqual(expected, actual)
+                    else:
+                        self.assertTrue(math.isclose(expected_number, actual_number, rel_tol=1e-10, abs_tol=1e-10),
+                                        (expected, actual))
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            function_file = root / "mpi_acceptance_functions.py"
+            function_file.write_text(
+                "def global_point_count(dataset, constants):\n"
+                "    return {'global': dataset.GetNumberOfPoints(), 'reduction': 'sum'}\n",
+                encoding="utf-8",
+            )
+            registry = root / "mpi_acceptance_functions.json"
+            registry.write_text(json.dumps({
+                "global_point_count": {"source": str(function_file), "function": "global_point_count"},
+            }), encoding="utf-8")
+            serial_request = make_request(root / "serial", registry)
+            prepare(serial_request)
+            execute(serial_request)
+
+            mpi_request = make_request(root / "mpi", registry)
+            prepare(mpi_request)
+            environment = os.environ.copy()
+            environment["OMPI_ALLOW_RUN_AS_ROOT"] = "1"
+            environment["OMPI_ALLOW_RUN_AS_ROOT_CONFIRM"] = "1"
+            result = subprocess.run(
+                [self.mpiexec, "-n", "2", sys.executable, "-m", "cfdpost", "execute",
+                 str(root / "mpi" / "request.json")],
+                cwd=Path.cwd(), env=environment, capture_output=True, text=True, timeout=120,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+            serial_line = self._rows(root / "serial" / "line_t0.0005_TEMPE.csv")
+            mpi_line = self._rows(root / "mpi" / "line_t0.0005_TEMPE.csv")
+            assert_csv_rows_close(serial_line, mpi_line)
+            self.assertTrue((root / "mpi" / "slice_t0.0005_TEMPE.png").is_file())
+            for action in (3, 4, 5):
+                assert_csv_rows_close(
+                    self._rows(root / "serial" / f"statistics_action{action:02d}.csv"),
+                    self._rows(root / "mpi" / f"statistics_action{action:02d}.csv"),
+                )
+            serial_global = json.loads((root / "serial" / "derived_variables.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+            mpi_global = json.loads((root / "mpi" / "derived_variables_rank0000.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+            self.assertEqual(serial_global["result"], mpi_global["result"])
+            self.assertEqual(mpi_global["result"], {"global": 84.0, "reduction": "sum"})
+            performance = json.loads((root / "mpi" / "performance.json").read_text(encoding="utf-8"))
+            self.assertEqual(performance["mpi_ranks"], 2)
             self.assertEqual(len(list((root / "mpi").glob("metrics_rank*.json"))), 2)
 
 

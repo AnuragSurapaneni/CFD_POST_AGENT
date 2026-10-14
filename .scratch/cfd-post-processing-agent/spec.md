@@ -69,6 +69,7 @@ A shared data kernel reads and checks CFD data, then exposes a common interface 
 - Keep statistics and plotting as independent modules that consume a shared kernel data interface. Neither module depends on the other.
 - Process datasets larger than RAM in partitions. Use MPI across selected nodes for a single large case, process temporal data in chunks, and allow independent cases to run as separate jobs. Read inputs in place unless cluster staging is required.
 - Weight temporal means and RMS by physical time. Provide raw RMS and fluctuation RMS as distinct results. Make spatial weighting explicit and record it with the result.
+- Treat `t=0` as the initial condition, not a temporal sample for temporal statistics; keep it available for analyses that explicitly request that snapshot. In the supplied fixture, `t=0` contains only the mesh, and temporal statistics use the populated snapshots at `t=0.0005` and `t=0.001`.
 - Define line plots by start and end coordinates. Estimate sampling resolution from the mesh by default and permit an override.
 - Define slices by origin and orientation. Require an explicit averaging axis for azimuthal calculations. Use radial bins with user-selectable count or spacing; report angular coverage and ask before interpreting a partial sector as a complete circumference.
 - Start contour visualization with filled 2D contours on requested slices. Require a selected scalar field. Support shared contour scales for comparisons and automatic scales per image.
@@ -85,6 +86,7 @@ A shared data kernel reads and checks CFD data, then exposes a common interface 
 
 - Use one black-box end-to-end acceptance seam: from an agreed analysis request through the generated Python and Slurm scripts to produced local statistics and visualizations.
 - Good tests verify externally visible behavior with representative small fixtures, not internal class structure or implementation details. Fixtures should include point and cell fields, temporal data with physical timestamps, and the supported dataset organization.
+- For the supplied temporal fixture, verify that `t=0` is treated as the initial condition and excluded from the temporal mean and RMS window; the explicit statistical window is `t=0.0005` through `t=0.001`.
 - Exercise the reader and consistency checks through the workflow boundary, including a valid dataset and a mismatched point or cell array that must produce a clear failure report without repair.
 - Exercise a composed workflow containing a line plot, a slice, a threshold, a derived variable, time-weighted statistics, and a contour or streamline output. Check numerical results, generated files, and recorded parameters.
 - Check that ambiguous time selections and missing streamline seeds result in a user question before execution.

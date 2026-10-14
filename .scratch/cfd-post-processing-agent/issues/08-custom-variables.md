@@ -19,4 +19,4 @@
 - `test_composed_temporal_workflow_covers_derived_line_slice_threshold_streamline_and_average` checks point data from a registered function reused by a later line plot.
 - `test_custom_cell_variable_is_saved_and_reused_by_a_later_plot` verifies file registration survives into a second analysis request, a cell field is plotted, and the derived VTK file contains expected values.
 - `test_vtm_custom_global_results_combine_all_blocks` verifies a global sum over multiple VTM blocks.
-- Cross-rank custom reductions remain unverified because the opt-in MPI integration test was skipped; this criterion remains open with ticket #03.
+- `test_user_pvtu_temporal_workflow_matches_single_rank_outputs` also compares a custom cross-rank point-count reduction with serial output. It remains opt-in and unverified here because the local MPI launcher could not bind its socket, so no ranks started; this criterion remains open with ticket #03.
